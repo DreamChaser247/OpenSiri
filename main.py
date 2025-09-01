@@ -5,6 +5,7 @@ import numpy as np
 import sounddevice as sd
 import whisper
 import webrtcvad
+import subprocess
 
 from pydub import AudioSegment
 from threading import Thread, Event
@@ -12,7 +13,6 @@ from queue import Queue
 from openwakeword.model import Model
 
 # Load the Whisper model
-# model = whisper.load_model("tiny.en")
 
 print(sd.query_devices()) # List available audio devices
 
@@ -25,6 +25,7 @@ model = Model(
     wakeword_models=["env310/lib/python3.10/site-packages/openwakeword/resources/models/alexa_v0.1.tflite"],  # can also leave this argument empty to load all of the included pre-trained models
 )
 
+modelWhisper = whisper.load_model("tiny.en")
 
 sample_rate = 16000
 chunk_duration = 0.08  # 80ms chunks
@@ -57,7 +58,7 @@ class AudioProcessor:
                 results.append(1)
             else:
                 results.append(0)
-        print(results)
+        # print(results)
         if results.count(1) == 0:
             if not self.listeningToSilence:
                 self.silenceStart = time.time()
@@ -70,6 +71,7 @@ class AudioProcessor:
             self.isListening = False
             self.listeningToSilence = False
             self.extractAudioFile()
+            commandGate.processCommand(self.transcribe())
             
         return results
 
@@ -81,8 +83,8 @@ class AudioProcessor:
             self.listeningStart = time.time()
             self.isListening = True
             self.commandAudioChunks.clear()
-        else:
-            print(prediction)
+        # else:
+            # print(prediction)
 
     def extractAudioFile(self):
         audioData = np.concatenate(self.commandAudioChunks)
@@ -95,6 +97,11 @@ class AudioProcessor:
 
         audioPreExport.export(".command.mp3", format="mp3", bitrate="128k")
 
+    def transcribe(sefl):
+
+        result = modelWhisper.transcribe(".command.mp3")
+        return result["text"]
+
     async def audioProcess(self):
         while True:
             if not chunkQueue.empty():
@@ -105,6 +112,54 @@ class AudioProcessor:
                     self.commandAudioChunks.append(frame)
             
             await asyncio.sleep(0.01)  # Slight delay to prevent busy waiting
+
+class CommandProcessor:
+    def __init__(self):
+        aaa=1
+
+    def preProcess(self, commandText):
+        commandText = commandText.lower().lstrip().rstrip(".?!")
+        commandIngredients = commandText.split(" ")
+        return commandIngredients
+    
+    def openApp(self, appName):
+        if appName == "terminal":
+            appName = "gnome-terminal"
+        elif appName == "browser":
+            appName = "firefox"
+        elif appName == "extensions":
+            appName = "extension-manager"
+        elif appName == "files":
+            appName = "nautilus"
+        elif appName == "calculator":
+            appName = "gnome-calculator"
+        elif appName == "clock":
+            appName = "gnome-clocks"
+        elif appName == "bluetooth":
+            appName = "blueman-manager"
+
+        try:
+            subprocess.Popen([appName])
+        except FileNotFoundError:
+            print(f"Error: Could not find an application named '{appName}'.")
+    def processCommand(self, commandText):
+        print(f"Processing command: {commandText}")
+        commandIngredients = self.preProcess(commandText)
+        print(commandIngredients)
+        if commandIngredients[0] == "open":
+            if len(commandIngredients) == 2:
+                self.openApp(commandIngredients[1])
+            else:
+                if commandIngredients[1] == "the":
+                    self.openApp(commandIngredients[2])
+
+        if commandIngredients[0] == "end":
+            if commandIngredients[1] == "yourself":
+                print("Disabling myself...")
+                exitCondition.set()
+                audioStreamThread.join()
+                print("Disabled")
+                raise KeyboardInterrupt
 
 def audioStream(exitCondition):
     def callback(inData, frameCount, timeInfo, status):
@@ -140,6 +195,7 @@ if __name__ == "__main__":
     # isListening = Event()
     audioStreamThread = Thread(target=audioStream, args=(exitCondition,) , daemon=True)
     audioGate = AudioProcessor()
+    commandGate = CommandProcessor()
     try:
         asyncio.run(main(audioGate, audioStreamThread))
 
