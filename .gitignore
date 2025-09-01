@@ -2,5 +2,8 @@
 # playground
 aaa.py
 
+# Generated audio file
+.command.mp3 
+
 env310/
 myevn/
