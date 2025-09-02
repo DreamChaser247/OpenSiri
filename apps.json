@@ -1,0 +1,11 @@
+{
+    "terminal": "gnome-terminal",
+    "browser": "firefox",
+    "extensions": "extension-manager",
+    "files": "nautilus",
+    "calculator": "gnome-calculator",
+    "clock": "gnome-clocks",
+    "bluetooth": "blueman-manager",
+    "settings": "gnome-control-center",
+    "resources": "flatpak run net.nokyan.Resources"
+}

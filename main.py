@@ -6,6 +6,7 @@ import sounddevice as sd
 import whisper
 import webrtcvad
 import subprocess
+import json
 
 from pydub import AudioSegment
 from threading import Thread, Event
@@ -17,6 +18,8 @@ from openwakeword.model import Model
 print(sd.query_devices()) # List available audio devices
 
 chunkQueue = Queue() # Create a queue to hold audio chunks
+
+subprocess.Popen(["pulseaudio --start"], shell=True)  # Start PulseAudio if not already running
 
 # openwakeword.utils.download_models()  # download the pre-trained models if they are not already present
 
@@ -40,13 +43,14 @@ class AudioProcessor:
     def __init__(self, threshold=0.5):
         self.threshold = threshold
         self.endingSilenceDuration = 1.0  # seconds
-        self.startingSilenceDuration = 2  # seconds
+        self.startingSilenceDuration = 3.0  # seconds
         self.listeningToSilence = False
         self.silenceStart = time.time()
         self.listeningStart = time.time()
         self.isListening = False
         self.maximumListeningTime = 6.0 # seconds
         self.commandAudioChunks = []
+
 
 
     def voiceDetect(self, frame):
@@ -66,11 +70,14 @@ class AudioProcessor:
         else:
             self.listeningToSilence = False
         timeNow = time.time()
-        if (timeNow - self.silenceStart > self.endingSilenceDuration and self.listeningToSilence) or timeNow - self.listeningStart > self.maximumListeningTime:
+        listeningDuration = timeNow - self.listeningStart
+        if ((listeningDuration > self.endingSilenceDuration and self.listeningToSilence) or listeningDuration > self.maximumListeningTime) and listeningDuration > self.startingSilenceDuration:
             print("ending listening") 
             self.isListening = False
             self.listeningToSilence = False
             self.extractAudioFile()
+            if waitingForAnswer.is_set():
+                waitingForAnswer.clear()
             commandGate.processCommand(self.transcribe())
             
         return results
@@ -83,8 +90,15 @@ class AudioProcessor:
             self.listeningStart = time.time()
             self.isListening = True
             self.commandAudioChunks.clear()
+
         # else:
             # print(prediction)
+    def askQuestion(self, question):
+        print(f"{question} ????????????????????????????????????????????????????????")
+        self.listeningStart = time.time()
+        self.isListening = True
+        self.commandAudioChunks.clear()
+        waitingForAnswer.set()
 
     def extractAudioFile(self):
         audioData = np.concatenate(self.commandAudioChunks)
@@ -97,7 +111,7 @@ class AudioProcessor:
 
         audioPreExport.export(".command.mp3", format="mp3", bitrate="128k")
 
-    def transcribe(sefl):
+    def transcribe(self):
 
         result = modelWhisper.transcribe(".command.mp3")
         return result["text"]
@@ -115,51 +129,81 @@ class AudioProcessor:
 
 class CommandProcessor:
     def __init__(self):
-        aaa=1
+        self.awaitingProcess = ""
+        self.objectOfQuestion = ""
+
 
     def preProcess(self, commandText):
         commandText = commandText.lower().lstrip().rstrip(".?!")
         commandIngredients = commandText.split(" ")
+        length = len(commandIngredients)
+        for i in range(2-length):
+            commandIngredients.append("null")
+        print(f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! {length}")
+        print(commandIngredients)
         return commandIngredients
     
-    def openApp(self, appName):
-        if appName == "terminal":
-            appName = "gnome-terminal"
-        elif appName == "browser":
-            appName = "firefox"
-        elif appName == "extensions":
-            appName = "extension-manager"
-        elif appName == "files":
-            appName = "nautilus"
-        elif appName == "calculator":
-            appName = "gnome-calculator"
-        elif appName == "clock":
-            appName = "gnome-clocks"
-        elif appName == "bluetooth":
-            appName = "blueman-manager"
+    def getTheAppName(self, commandIngredients):
+        appName = ""
+        if len(commandIngredients) == 2:
+            appName = commandIngredients[1]
+        elif commandIngredients[1] == "the":
+                appName = commandIngredients[2]
+        return appName
+    
+    def openApp(self, commandIngredients):
+        appName = self.getTheAppName(commandIngredients)
+        with open("apps.json", "r") as f:
+            appMapping = json.load(f)
+            appName = appMapping.get(appName, appName)
 
         try:
             subprocess.Popen([appName])
         except FileNotFoundError:
             print(f"Error: Could not find an application named '{appName}'.")
-    def processCommand(self, commandText):
-        print(f"Processing command: {commandText}")
-        commandIngredients = self.preProcess(commandText)
-        print(commandIngredients)
-        if commandIngredients[0] == "open":
-            if len(commandIngredients) == 2:
-                self.openApp(commandIngredients[1])
-            else:
-                if commandIngredients[1] == "the":
-                    self.openApp(commandIngredients[2])
-
-        if commandIngredients[0] == "end":
-            if commandIngredients[1] == "yourself":
+    
+    def closeApp(self, commandIngredients):
+        appName = self.getTheAppName(commandIngredients)
+        if commandIngredients[1] == "yourself":
                 print("Disabling myself...")
                 exitCondition.set()
                 audioStreamThread.join()
                 print("Disabled")
                 raise KeyboardInterrupt
+        self.awaitingProcess = "closeConfirm"
+        self.objectOfQuestion = appName
+        audioGate.askQuestion(f"Are you sure you want to close {appName}")
+        print(f"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa{audioGate.isListening}")
+    
+    def closeAppConfirmed(self, commandIngredients):
+        with open("reactions.json", "r") as f:
+            reactions = json.load(f)
+            commandToRun = f"pkill {self.objectOfQuestion}"
+            print(commandToRun)
+            if commandIngredients[1] in reactions["confirmation"]:
+                print(f"closing {self.objectOfQuestion}")
+                subprocess.Popen([commandToRun], shell=True)
+                self.objectOfQuestion = ""
+            else:
+                print("failed to confirm")
+                self.objectOfQuestion = ""
+
+        
+    def processCommand(self, commandText):
+        print(f"Processing command: {commandText}")
+        commandIngredients = self.preProcess(commandText)
+        if self.awaitingProcess != "":
+            commandIngredients.insert(0, self.awaitingProcess)
+            self.awaitingProcess = ""
+
+        print(commandIngredients)
+        if commandIngredients[0] == "open":
+            self.openApp(commandIngredients)
+
+        if commandIngredients[0] == "close":
+            self.closeApp(commandIngredients)
+        if commandIngredients[0] == "closeConfirm":
+            self.closeAppConfirmed(commandIngredients)
 
 def audioStream(exitCondition):
     def callback(inData, frameCount, timeInfo, status):
@@ -183,16 +227,9 @@ async def main(audioGate, audioStreamThread):
     audioStreamThread.start()
     await audioGate.audioProcess()
 
-async def getAudioCommand():
-    print("Listening for command...")
-    frames = []
-    start_time = time.time()
-
-
-
 if __name__ == "__main__":
     exitCondition = Event()
-    # isListening = Event()
+    waitingForAnswer = Event()
     audioStreamThread = Thread(target=audioStream, args=(exitCondition,) , daemon=True)
     audioGate = AudioProcessor()
     commandGate = CommandProcessor()
