@@ -159,16 +159,13 @@ class CommandProcessor:
 
         try:
             subprocess.Popen([appName])
-        except FileNotFoundError:
+        except:
             print(f"Error: Could not find an application named '{appName}'.")
     
     def closeApp(self, commandIngredients):
         appName = self.getTheAppName(commandIngredients)
         if commandIngredients[1] == "yourself":
                 print("Disabling myself...")
-                exitCondition.set()
-                audioStreamThread.join()
-                print("Disabled")
                 raise KeyboardInterrupt
         self.awaitingProcess = "closeConfirm"
         self.objectOfQuestion = appName
