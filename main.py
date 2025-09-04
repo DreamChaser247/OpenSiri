@@ -21,11 +21,11 @@ chunkQueue = Queue() # Create a queue to hold audio chunks
 
 subprocess.Popen(["pulseaudio --start"], shell=True)  # Start PulseAudio if not already running
 
-# openwakeword.utils.download_models()  # download the pre-trained models if they are not already present
+openwakeword.utils.download_models()  # download the pre-trained models if they are not already present
 
 # Instantiate the model(s)
 model = Model(
-    wakeword_models=["env310/lib/python3.10/site-packages/openwakeword/resources/models/alexa_v0.1.tflite"],  # can also leave this argument empty to load all of the included pre-trained models
+    wakeword_models=["siri.tflite"],  # can also leave this argument empty to load all of the included pre-trained models
 )
 
 modelWhisper = whisper.load_model("tiny.en")
@@ -83,13 +83,16 @@ class AudioProcessor:
         return results
 
     def openWakeWord(self, frame):
-        prediction = model.predict(frame, debounce_time=1, threshold={"alexa_v0.1": 0.4})
+        prediction = model.predict(frame, debounce_time=1, threshold={"siri": 0.4})
         # prediction = model.predict(frame)
-        if prediction['alexa_v0.1'] > self.threshold:
-            print("Alexa!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
+        if prediction['siri'] > self.threshold:
+            print(f"Siri!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!{prediction['siri']}")
             self.listeningStart = time.time()
             self.isListening = True
             self.commandAudioChunks.clear()
+        else:
+            print(prediction)
 
         # else:
             # print(prediction)
@@ -124,6 +127,8 @@ class AudioProcessor:
                 if self.isListening:
                     self.voiceDetect(frame)
                     self.commandAudioChunks.append(frame)
+                
+            
             
             await asyncio.sleep(0.01)  # Slight delay to prevent busy waiting
 
@@ -139,8 +144,8 @@ class CommandProcessor:
         length = len(commandIngredients)
         for i in range(2-length):
             commandIngredients.append("null")
-        print(f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! {length}")
-        print(commandIngredients)
+        # print(f"!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! {length}")
+        # print(commandIngredients)
         return commandIngredients
     
     def getTheAppName(self, commandIngredients):
